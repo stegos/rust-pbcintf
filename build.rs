@@ -37,4 +37,9 @@ fn main() {
     bindings
         .write_to_file("src/bindings.rs")
         .expect("Couldn't write bindings!");
+
+    // Tell rustc to link against libPBC and libGMP
+    println!("cargo:rustc-link-lib=dylib=pbc");
+    println!("cargo:rustc-link-lib=dylib=gmp");
+    // println!("cargo:rustc-link-search=/Users/davidmcclain/projects/Emotiq/var/local/lib");
 }

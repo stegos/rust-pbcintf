@@ -6,6 +6,7 @@ links = "pbc"
 build = "build.rs"
 
 [dependencies]
+rust-gmp = "0.5.0"
 
 [[example]]
 name = "echo-test"
