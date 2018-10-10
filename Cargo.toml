@@ -2,6 +2,7 @@
 name = "rust-libpbc"
 version = "0.1.0"
 authors = ["Eugene Chupriyanov <tchu@tchu.ru>"]
+links = "pbc"
 build = "build.rs"
 
 [dependencies]

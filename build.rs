@@ -14,9 +14,9 @@ fn main() {
     conf.cpp(true)
         .file("src/pbc_intf.cpp")
         .compile("pbc_intf");
-```
+
     println!("cargo:rustc-link-lib=pbc");
-```
+
     // The bindgen::Builder is the main entry point
     // to bindgen, and lets you build up options for
     // the resulting bindings.
