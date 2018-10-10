@@ -14,7 +14,9 @@ fn main() {
     conf.cpp(true)
         .file("src/pbc_intf.cpp")
         .compile("pbc_intf");
-
+```
+    println!("cargo:rustc-link-lib=pbc");
+```
     // The bindgen::Builder is the main entry point
     // to bindgen, and lets you build up options for
     // the resulting bindings.
@@ -31,5 +33,8 @@ fn main() {
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     bindings
         .write_to_file(out_path.join("bindings.rs"))
+        .expect("Couldn't write bindings!");
+    bindings
+        .write_to_file("src/bindings.rs")
         .expect("Couldn't write bindings!");
 }

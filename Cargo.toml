@@ -9,6 +9,9 @@ build = "build.rs"
 [[example]]
 name = "echo-test"
 
+[[example]]
+name = "pbc-init-test"
+
 [build-dependencies]
 bindgen = "0.42.1"
 cc = "1.0.25"
