@@ -2,15 +2,13 @@
 name = "rust-libpbc"
 version = "0.1.0"
 authors = ["Eugene Chupriyanov <tchu@tchu.ru>"]
+links = "pbc"
 build = "build.rs"
 
 [dependencies]
 
 [[example]]
 name = "echo-test"
-
-[[example]]
-name = "pbc-init-test"
 
 [build-dependencies]
 bindgen = "0.42.1"
