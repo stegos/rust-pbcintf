@@ -45,6 +45,7 @@ use std::sync::{Mutex, Arc};
 use std::rc::Rc;
 use std::thread;
 use std::marker;
+use std::ops::{Add, Sub, Mul, Div, Neg, AddAssign, SubAssign, MulAssign, DivAssign};
 
 // -------------------------------------------------------------------
 // Fast AR160 curves, but low security 2^80
@@ -90,7 +91,7 @@ const GT_SIZE_AR160 : usize = 128;
 // -------------------------------------------------------------------
 
 struct PBCInfo {
-    context      : u8,
+    context      : u8, // which slot in the gluelib context table
     name         : *const str,
     text         : *const str,
     g1_size      : usize,
@@ -281,29 +282,34 @@ fn main() {
     // -------------------------------------
     // on Secure pairings
     // test PRNG
-    let z = secure::get_random_Zr();
-    println!("rand Zr = {}", z.to_str());
+    println!("rand Zr = {}", secure::get_random_Zr());
 
     // test keying...
     let (skey, pkey, sig) = secure::make_deterministic_keys("Testing");
-    println!("skey = {}", skey.to_str());
-    println!("pkey = {}", pkey.to_str());
-    println!("sig  = {}", sig.to_str());
+    println!("skey = {}", skey);
+    println!("pkey = {}", pkey);
+    println!("sig  = {}", sig);
     assert!(secure::check_keying(&pkey, &sig));
     println!("");
 
     // -------------------------------------
     // on Fast pairings
     // test PRNG
-    let z = fast::get_random_Zr();
-    println!("rand Zr = {}", z.to_str());
+    println!("rand Zr = {}", fast::get_random_Zr());
 
     // test keying...
     let (skey, pkey, sig) = fast::make_deterministic_keys("Testing");
-    println!("skey = {}", skey.to_str());
-    println!("pkey = {}", pkey.to_str());
-    println!("sig  = {}", sig.to_str());
+    println!("skey = {}", skey);
+    println!("pkey = {}", pkey);
+    println!("sig  = {}", sig);
     assert!(fast::check_keying(&pkey, &sig));
+
+    // -------------------------------------
+    // check some arithmetic on the Fast curves
+    let a = 0x123456789i64;
+    println!("chk Zr: 0x{:x} -> {}", a, fast::Zr::from_int(a));
+    println!("chk Zr: -1 -> {}", fast::Zr::from_int(-1));
+    println!("chk Zr: -1 + 1 -> {}", fast::Zr::from(-1) + 1);
 }
 
 // -----------------------------------------------------
@@ -338,7 +344,7 @@ pub fn hash(msg : &[u8]) -> Hash {
 }
 
 // ------------------------------------------------------------------
-// Secure Pairings using BN Curve FR256
+// Secure Pairings using BN Curve FR256 (type F, r approx 256 bits)
 
 mod secure {
     use super::*;
@@ -352,6 +358,8 @@ mod secure {
         }
 
         pub fn from_str(s : &str) -> Zr {
+            // result might be larger than prime order, r,
+            // but will be interpreted by PBC lib as (Zr mod r).
             let mut v = [0u8;ZR_SIZE_FR256];
             str_to_u8v(&s, &mut v);
             Zr(v)
@@ -362,6 +370,12 @@ mod secure {
         }
     }
 
+    impl fmt::Display for Zr {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}", self.to_str())
+        }
+    }
+    
     // -----------------------------------------
     #[derive(Copy, Clone)]
     pub struct G1([u8;G1_SIZE_FR256]);
@@ -376,7 +390,14 @@ mod secure {
         }
     }
 
-    // -----------------------------------------
+    impl fmt::Display for G1 {
+        // for display of signatures
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}", self.to_str())
+        }
+    }
+    
+// -----------------------------------------
     #[derive(Copy, Clone)]
     pub struct G2([u8;G2_SIZE_FR256]);
 
@@ -391,6 +412,12 @@ mod secure {
         }
     }
 
+    impl fmt::Display for G2 {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}", self.to_str())
+        }
+    }
+    
     // -----------------------------------------
     #[derive(Copy, Clone)]
     pub struct SecretKey (Zr);
@@ -405,6 +432,12 @@ mod secure {
         }
     }
 
+    impl fmt::Display for SecretKey {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}", self.to_str())
+        }
+    }
+    
     // -----------------------------------------
     #[derive(Copy, Clone)]
     pub struct PublicKey (G2);
@@ -419,6 +452,12 @@ mod secure {
         }
     }
 
+    impl fmt::Display for PublicKey {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}", self.to_str())
+        }
+    }
+    
     // -----------------------------------------
     #[derive(Copy, Clone)]
     pub struct BlsSignature {
@@ -515,7 +554,7 @@ mod secure {
 }
 
 // --------------------------------------------------------------------------
-// Faster, but less secure, pairings with curves AR160 
+// Faster, but less secure, pairings with curves AR160 (type A, r approx 160 bits)
 // (intended for eRandHound ephemeral secrets)
 
 mod fast {
@@ -535,12 +574,190 @@ mod fast {
             Zr(v)
         }
 
+        pub fn from_int(a : i64) -> Zr {
+            let mut v = [0u8;ZR_SIZE_AR160]; // big-endian encoding as byte vector
+            let mut va = if a < 0 {
+                                    -(a as i128)
+                                } 
+                                else {
+                                    a as i128
+                                };
+            for ix in 0 .. 8 {
+                v[ZR_SIZE_AR160-ix-1] = (va & 0x0ff) as u8;
+                va >>= 8;
+            }
+            if a < 0 {
+                -Zr(v)
+            } else {
+                Zr(v)
+            }
+        }
+
         pub fn to_str(&self) -> String {
             u8v_to_typed_str("Zr", &self.base_vector())
         }
     }
 
-    // -----------------------------------------
+    impl From<i64> for Zr {
+        fn from(x : i64) -> Zr {
+            Zr::from_int(x)
+        }
+    }
+
+    impl fmt::Display for Zr {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}", self.to_str())
+        }
+    }
+    
+    // -------------------------------------
+    // Zr op i64
+
+    impl Add<i64> for Zr {
+        type Output = Zr;
+        fn add(self, other: i64) -> Zr {
+            self + Zr::from(other)
+        }
+    }
+
+    impl Sub<i64> for Zr {
+        type Output = Zr;
+        fn sub(self, other: i64) -> Zr {
+            self - Zr::from(other)
+        }
+    }
+
+    impl Mul<i64> for Zr {
+        type Output = Zr;
+        fn mul(self, other: i64) -> Zr {
+            self * Zr::from(other)
+        }
+    }
+
+    impl Div<i64> for Zr {
+        type Output = Zr;
+        fn div(self, other: i64) -> Zr {
+            self / Zr::from(other)
+        }
+    }
+
+    // -------------------------------------
+    // i64 op Zr
+    impl Add<Zr> for i64 {
+        type Output = Zr;
+        fn add(self, other: Zr) -> Zr {
+            Zr::from(self) + other
+        }
+    }
+
+    impl Sub<Zr> for i64 {
+        type Output = Zr;
+        fn sub(self, other: Zr) -> Zr {
+            Zr::from(self) - other
+        }
+    }
+
+    impl Mul<Zr> for i64 {
+        type Output = Zr;
+        fn mul(self, other: Zr) -> Zr {
+            Zr::from(self) * other
+        }
+    }
+
+    impl Div<Zr> for i64 {
+        type Output = Zr;
+        fn div(self, other: Zr) -> Zr {
+            Zr::from(self) / other
+        }
+    }
+
+    // -------------------------------------
+    // Zr op Zr
+
+    impl Neg for Zr {
+        type Output = Zr;
+        fn neg(self) -> Zr {
+            neg_Zr(&self)
+        }
+    }
+
+    impl Add<Zr> for Zr {
+        type Output = Zr;
+        fn add(self, other: Zr) -> Zr {
+            add_Zr_Zr(&self, &other)
+        }
+    }
+
+    impl Sub<Zr> for Zr {
+        type Output = Zr;
+        fn sub(self, other: Zr) -> Zr {
+            sub_Zr_Zr(&self, &other)
+        }
+    }
+
+    impl Mul<Zr> for Zr {
+        type Output = Zr;
+        fn mul(self, other: Zr) -> Zr {
+            mul_Zr_Zr(&self, &other)
+        }
+    }
+    
+    impl Div<Zr> for Zr {
+        type Output = Zr;
+        fn div(self, other: Zr) -> Zr {
+            div_Zr_Zr(&self, &other)
+        }
+    }
+    
+    impl AddAssign<i64> for Zr {
+        fn add_assign(&mut self, other: i64) {
+            *self += Zr::from(other);
+        }
+    }
+ 
+     impl SubAssign<i64> for Zr {
+        fn sub_assign(&mut self, other: i64) {
+            *self -= Zr::from(other);
+        }
+    }
+
+    impl MulAssign<i64> for Zr {
+        fn mul_assign(&mut self, other: i64) {
+            *self *= Zr::from(other);
+        }
+    }
+ 
+     impl DivAssign<i64> for Zr {
+        fn div_assign(&mut self, other: i64) {
+            *self /= Zr::from(other);
+        }  
+    }
+
+    impl AddAssign<Zr> for Zr {
+        fn add_assign(&mut self, other: Zr) {
+            *self = *self + other;
+        }
+    }
+ 
+     impl SubAssign<Zr> for Zr {
+        fn sub_assign(&mut self, other: Zr) {
+            *self = *self - other;
+        }
+    }
+
+    impl MulAssign<Zr> for Zr {
+        fn mul_assign(&mut self, other: Zr) {
+            *self = *self * other;
+        }   
+    }
+ 
+     impl DivAssign<Zr> for Zr {
+        fn div_assign(&mut self, other: Zr) {
+            *self = *self / other;
+        }
+    }
+
+   // -----------------------------------------
     #[derive(Copy, Clone)]
     pub struct G1([u8;G1_SIZE_AR160]);
 
@@ -554,7 +771,112 @@ mod fast {
         }
     }
 
-    // -----------------------------------------
+    impl fmt::Display for G1 {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}", self.to_str())
+        }
+    }
+    
+    impl Neg for G1 {
+        type Output = G1;
+        fn neg(self) -> G1 {
+            neg_G1(&self)
+        }
+    }
+
+    impl Add<G1> for G1 {
+        type Output = G1;
+        fn add(self, other: G1) -> G1 {
+            add_G1_G1(&self, &other)
+        }
+    }
+    
+    impl Sub<G1> for G1 {
+        type Output = G1;
+        fn sub(self, other: G1) -> G1 {
+            sub_G1_G1(&self, &other)
+        }
+    }
+
+    impl Mul<Zr> for G1 {
+        type Output = G1;
+        fn mul(self, other: Zr) -> G1 {
+            mul_G1_Zr(&self, &other)
+        }
+    }
+    
+    impl Div<Zr> for G1 {
+        type Output = G1;
+        fn div(self, other: Zr) -> G1 {
+            div_G1_Zr(&self, &other)
+        }
+    }
+
+    impl Mul<G1> for Zr {
+        type Output = G1;
+        fn mul(self, other: G1) -> G1 {
+            mul_G1_Zr(&other, &self)
+        }
+    }
+
+    impl Mul<G1> for i64 {
+        type Output = G1;
+        fn mul(self, other: G1) -> G1 {
+            Zr::from(self) * other
+        }
+    }
+    
+    impl Div<i64> for G1 {
+        type Output = G1;
+        fn div(self, other: i64) -> G1 {
+            self / Zr::from(other)
+        }
+    }
+
+    impl Mul<i64> for G1 {
+        type Output = G1;
+        fn mul(self, other: i64) -> G1 {
+            self * Zr::from(other)
+        }
+    }
+
+    impl AddAssign<G1> for G1 {
+        fn add_assign(&mut self, other: G1) {
+            *self = *self + other;
+        }
+    }
+ 
+    impl SubAssign<G1> for G1 {
+        fn sub_assign(&mut self, other: G1) {
+            *self = *self - other;
+        }
+    }
+
+    impl MulAssign<Zr> for G1 {
+        fn mul_assign(&mut self, other: Zr) {
+            *self = *self * other;
+        }
+    }
+ 
+    impl DivAssign<Zr> for G1 {
+        fn div_assign(&mut self, other: Zr) {
+            *self = *self / other;
+        }
+    }
+
+    impl MulAssign<i64> for G1 {
+        fn mul_assign(&mut self, other: i64) {
+            *self *= Zr::from(other);
+        }
+    }
+ 
+    impl DivAssign<i64> for G1 {
+        fn div_assign(&mut self, other: i64) {
+            *self /= Zr::from(other);
+        }
+    }
+
+// -----------------------------------------
     #[derive(Copy, Clone)]
     pub struct G2([u8;G2_SIZE_AR160]);
 
@@ -569,7 +891,112 @@ mod fast {
         }
     }
 
-    // -----------------------------------------
+    impl fmt::Display for G2 {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}", self.to_str())
+        }
+    }
+    
+    impl Neg for G2 {
+        type Output = G2;
+        fn neg(self) -> G2 {
+            neg_G2(&self)
+        }
+    }
+
+    impl Add<G2> for G2 {
+        type Output = G2;
+        fn add(self, other: G2) -> G2 {
+            add_G2_G2(&self, &other)
+        }
+    }
+    
+    impl Sub<G2> for G2 {
+        type Output = G2;
+        fn sub(self, other: G2) -> G2 {
+            sub_G2_G2(&self, &other)
+        }
+    }
+
+    impl Mul<Zr> for G2 {
+        type Output = G2;
+        fn mul(self, other: Zr) -> G2 {
+            mul_G2_Zr(&self, &other)
+        }
+    }
+    
+    impl Mul<i64> for G2 {
+        type Output = G2;
+        fn mul(self, other: i64) -> G2 {
+            self * Zr::from(other)
+        }
+    }
+    
+    impl Div<Zr> for G2 {
+        type Output = G2;
+        fn div(self, other: Zr) -> G2 {
+            div_G2_Zr(&self, &other)
+        }
+    }
+
+    impl Div<i64> for G2 {
+        type Output = G2;
+        fn div(self, other: i64) -> G2 {
+            self / Zr::from(other)
+        }
+    }
+
+    impl Mul<G2> for Zr {
+        type Output = G2;
+        fn mul(self, other: G2) -> G2 {
+            mul_G2_Zr(&other, &self)
+        }
+    }
+    
+    impl Mul<G2> for i64 {
+        type Output = G2;
+        fn mul(self, other: G2) -> G2 {
+            other * Zr::from(self)
+        }
+    }
+    
+    impl AddAssign<G2> for G2 {
+        fn add_assign(&mut self, other: G2) {
+            *self = *self + other;
+        }
+    }
+ 
+    impl SubAssign<G2> for G2 {
+        fn sub_assign(&mut self, other: G2) {
+            *self = *self - other;
+        }
+    }
+
+    impl MulAssign<Zr> for G2 {
+        fn mul_assign(&mut self, other: Zr) {
+            *self = *self * other;
+        }
+    }
+ 
+    impl DivAssign<Zr> for G2 {
+        fn div_assign(&mut self, other: Zr) {
+            *self = *self / other;
+        }
+    }
+
+    impl MulAssign<i64> for G2 {
+        fn mul_assign(&mut self, other: i64) {
+            *self *= Zr::from(other);
+        }
+    }
+ 
+    impl DivAssign<i64> for G2 {
+        fn div_assign(&mut self, other: i64) {
+            *self /= Zr::from(other);
+        }
+    }
+
+// -----------------------------------------
     #[derive(Copy, Clone)]
     pub struct GT([u8;GT_SIZE_AR160]);
 
@@ -584,7 +1011,39 @@ mod fast {
         }
     }
 
-    // -----------------------------------------
+    impl fmt::Display for GT {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}", self.to_str())
+        }
+    }
+    
+    impl Mul<GT> for GT {
+        type Output = GT;
+        fn mul(self, other: GT) -> GT {
+            mul_GT_GT(&self, &other)
+        }
+    }
+
+    impl Div<GT> for GT {
+        type Output = GT;
+        fn div(self, other: GT) -> GT {
+            div_GT_GT(&self, &other)
+        }
+    }
+
+    impl MulAssign<GT> for GT {
+        fn mul_assign(&mut self, other: GT) {
+            *self = *self * other;
+        }
+    }
+ 
+    impl DivAssign<GT> for GT {
+        fn div_assign(&mut self, other: GT) {
+            *self = *self / other;
+        }
+    }
+
+// -----------------------------------------
     #[derive(Copy, Clone)]
     pub struct SecretKey (Zr);
 
@@ -598,6 +1057,12 @@ mod fast {
         }
     }
 
+    impl fmt::Display for SecretKey {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}", self.to_str())
+        }
+    }
+    
     // -----------------------------------------
     #[derive(Copy, Clone)]
     pub struct PublicKey (G2);
@@ -612,7 +1077,13 @@ mod fast {
         }
     }
 
-    // ------------------------------------------------------------------
+    impl fmt::Display for PublicKey {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}", self.to_str())
+        }
+    }
+    
+// ------------------------------------------------------------------
     // Key Generation & Checking
 
     pub fn sign_hash(h : &Hash, skey : &SecretKey) -> G1 {
