@@ -1,6 +1,9 @@
 extern crate rust_libpbc;
 extern crate gmp;
 extern crate sha3;
+extern crate rand;
+
+use rand::prelude::*;
 
 #[macro_use]
 extern crate generic_array;
@@ -11,6 +14,11 @@ use generic_array::typenum::consts::U8;
 use std::fmt;
 use std::mem;
 use sha3::{Digest, Sha3_256};
+
+use std::sync::{Mutex, Arc};
+use std::rc::Rc;
+use std::thread;
+use std::marker;
 
 // -------------------------------------------------------------------
 
@@ -147,69 +155,69 @@ fn u8v_to_typed_str(pref : &str, vec : &[u8]) -> String {
 
 // -------------------------------------------------------------------
 
-fn init_pairings() {
-    for info in CURVES {
-        let context = info.context as u64;
-        unsafe {
-            println!("Init curve {}", (*info.name).to_string());
-            println!("Context: {}", context);
-            println!("{}", (*info.text).to_string());
-
-            let mut psize = [0u64;4];
-            let ans = rust_libpbc::init_pairing(
-                context,
-                info.text as *mut _,
-                (*info.text).len() as u64,
-                psize.as_ptr() as *mut _);
-            assert_eq!(ans, 0);
-            
-            assert_eq!(psize[0], info.g1_size as u64);
-            assert_eq!(psize[1], info.g2_size as u64);
-            assert_eq!(psize[2], info.pairing_size as u64);
-            assert_eq!(psize[3], info.field_size as u64);
-
-            let mut v1 = vec![0u8; info.g1_size];
-            str_to_u8v(&(*info.g1), &mut v1);
-            println!("G1: {}", u8v_to_str(&v1));
-            let len = rust_libpbc::set_g1(
-                context,
-                v1.as_ptr() as *mut _);
-            // returns nbr bytes read, should equal length of G1
-            assert_eq!(len, info.g1_size as i64);
-
-            let mut v1 = vec![0u8; info.g1_size];
-            let len = rust_libpbc::get_g1(
-                context,
-                v1.as_ptr() as *mut _,
-                info.g1_size as u64);
-            assert_eq!(len, info.g1_size as u64);
-            println!("G1 readback: {}", u8v_to_str(&v1));
-            
-            let mut v2 = vec![0u8; info.g2_size];
-            str_to_u8v(&(*info.g2), &mut v2);
-            println!("G2: {}", u8v_to_str(&v2));
-            let len = rust_libpbc::set_g2(
-                context,
-                v2.as_ptr() as *mut _);
-            // returns nbr bytes read, should equal length of G2
-            assert_eq!(len, info.g2_size as i64);
-
-            let mut v2 = vec![0u8; info.g2_size];
-            let len = rust_libpbc::get_g2(
-                context,
-                v2.as_ptr() as *mut _,
-                info.g2_size as u64);
-            assert_eq!(len, info.g2_size as u64);
-            println!("G2 readback: {}", u8v_to_str(&v2));
-            
-        }
-        println!("");
-    }
-}
-// ------------------------------------------------------------------------
-
 fn main() {
-    init_pairings();
+
+    fn init_pairings() {
+        for info in CURVES {
+            let context = info.context as u64;
+            unsafe {
+                println!("Init curve {}", (*info.name).to_string());
+                println!("Context: {}", context);
+                println!("{}", (*info.text).to_string());
+
+                let mut psize = [0u64;4];
+                let ans = rust_libpbc::init_pairing(
+                    context,
+                    info.text as *mut _,
+                    (*info.text).len() as u64,
+                    psize.as_ptr() as *mut _);
+                assert_eq!(ans, 0);
+                
+                assert_eq!(psize[0], info.g1_size as u64);
+                assert_eq!(psize[1], info.g2_size as u64);
+                assert_eq!(psize[2], info.pairing_size as u64);
+                assert_eq!(psize[3], info.field_size as u64);
+
+                let mut v1 = vec![0u8; info.g1_size];
+                str_to_u8v(&(*info.g1), &mut v1);
+                println!("G1: {}", u8v_to_str(&v1));
+                let len = rust_libpbc::set_g1(
+                    context,
+                    v1.as_ptr() as *mut _);
+                // returns nbr bytes read, should equal length of G1
+                assert_eq!(len, info.g1_size as i64);
+
+                let mut v1 = vec![0u8; info.g1_size];
+                let len = rust_libpbc::get_g1(
+                    context,
+                    v1.as_ptr() as *mut _,
+                    info.g1_size as u64);
+                assert_eq!(len, info.g1_size as u64);
+                println!("G1 readback: {}", u8v_to_str(&v1));
+                
+                let mut v2 = vec![0u8; info.g2_size];
+                str_to_u8v(&(*info.g2), &mut v2);
+                println!("G2: {}", u8v_to_str(&v2));
+                let len = rust_libpbc::set_g2(
+                    context,
+                    v2.as_ptr() as *mut _);
+                // returns nbr bytes read, should equal length of G2
+                assert_eq!(len, info.g2_size as i64);
+
+                let mut v2 = vec![0u8; info.g2_size];
+                let len = rust_libpbc::get_g2(
+                    context,
+                    v2.as_ptr() as *mut _,
+                    info.g2_size as u64);
+                assert_eq!(len, info.g2_size as u64);
+                println!("G2 readback: {}", u8v_to_str(&v2));
+                
+            }
+            println!("");
+        }
+    }
+    // ------------------------------------------------------------------------
+    // check connection to PBC library
     println!("Hello, world!");
     let input = "hello!".as_bytes();
     let output = vec![0u8; input.len()];
@@ -224,115 +232,58 @@ fn main() {
     }
     let out_str: String = std::str::from_utf8(&output).unwrap().to_string();
     println!("Echo Output: {}", out_str);
+    println!("");
+
+    // init PBC library
+    let init = Mutex::new(false);
+    {
+        let mut done = init.lock().unwrap();
+        if ! *done {
+            *done = true;
+            init_pairings();
+        }
+    }
+
+    // test hashing
+    let h = Hash::from_vector(b"");
+    println!("hash(\"\") = {}", h.to_str());
+    assert_eq!(h.to_str(), "H(a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a)");
+
+    // test PRNG
+    let z = secure::get_random_Zr();
+    println!("rand Zr = {}", z.to_str());
+
+    // test keying...
+    let (skey, pkey, sig) = secure::make_deterministic_keys("Testing");
+    println!("skey = {}", skey.to_str());
+    println!("pkey = {}", pkey.to_str());
+    println!("sig  = {}", sig.to_str());
+    assert!(secure::check_keying(&pkey, &sig));
 }
 
 // -----------------------------------------------------
-#[derive(Copy, Clone)]
-struct Zr([u8;ZR_SIZE_FR256]);
+// Hashing with SHA3
 
-impl Zr {
-    fn base_vector(&self) -> &[u8] {
-        &self.0
-    }
-
-    fn from_str(s : &str) -> Zr {
-        let mut v = [0u8;ZR_SIZE_FR256];
-        str_to_u8v(&s, &mut v);
-        Zr(v)
-    }
-
-    fn to_str(&self) -> String {
-        u8v_to_typed_str("Zr", &self.base_vector())
-    }
-}
-
-// -----------------------------------------
-#[derive(Copy, Clone)]
-struct G1([u8;G1_SIZE_FR256]);
-
-impl G1 {
-    fn base_vector(&self) -> &[u8] {
-        &self.0
-    }
-
-    fn to_str(&self) -> String {
-        u8v_to_typed_str("G1", &self.base_vector())
-    }
-}
-
-// -----------------------------------------
-#[derive(Copy, Clone)]
-struct G2([u8;G2_SIZE_FR256]);
-
-impl G2 {
-    fn base_vector(&self) -> &[u8] {
-        &self.0
-    }
-
-
-    fn to_str(&self) -> String {
-        u8v_to_typed_str("G2", &self.base_vector())
-    }
-}
-
-// -----------------------------------------
 const HASH_SIZE : usize = 32;
 
 #[derive(Copy, Clone)]
-struct Hash([u8; HASH_SIZE]);
+pub struct Hash([u8; HASH_SIZE]);
 
 impl Hash {
-    fn base_vector(&self) -> &[u8] {
+    pub fn base_vector(&self) -> &[u8] {
         &self.0
     }
 
-    fn from_vector(msg : &[u8]) -> Hash {
+    pub fn from_vector(msg : &[u8]) -> Hash {
         hash(msg)
     }
 
-    fn to_str(&self) -> String {
+    pub fn to_str(&self) -> String {
         u8v_to_typed_str("H", &self.base_vector())
     }
 }
 
-// -----------------------------------------
-#[derive(Copy, Clone)]
-struct SecretKey (Zr);
-
-impl SecretKey {
-    fn base_vector(&self) -> &[u8] {
-        self.0.base_vector()
-    }
-
-    fn to_str(&self) -> String {
-        u8v_to_typed_str("SKey", &self.base_vector())
-    }
-}
-
-// -----------------------------------------
-#[derive(Copy, Clone)]
-struct PublicKey (G2);
-
-impl PublicKey {
-    fn base_vector(&self) -> &[u8] {
-        self.0.base_vector()
-    }
-
-    fn to_str(&self) -> String {
-        u8v_to_typed_str("PKey", &self.base_vector())
-    }
-}
-
-// -----------------------------------------
-#[derive(Copy, Clone)]
-struct BlsSignature {
-    sig  : G1,
-    pkey : PublicKey
-}
-
-// ------------------------------------------------------------------------
-
-fn hash(msg : &[u8]) -> Hash {
+pub fn hash(msg : &[u8]) -> Hash {
     let mut hasher = Sha3_256::new();
     hasher.input(msg);
     let out = hasher.result();
@@ -341,41 +292,187 @@ fn hash(msg : &[u8]) -> Hash {
     Hash(h)
 }
 
-fn sign_hash(h : &Hash, skey : &SecretKey) -> G1 {
-    // return a raw signature on a hash
-    unsafe {
-        let v = [0u8; G1_SIZE_FR256];
-        rust_libpbc::sign_hash(
-            PBC_CONTEXT_FR256 as u64,
-            v.as_ptr() as *mut _,
-            skey.base_vector().as_ptr() as *mut _,
-            h.base_vector().as_ptr() as *mut _,
-            HASH_SIZE as u64);
-        G1(v)
-    }
-}
+// ------------------------------------------------------------------
+// Secure Pairings using BN Curve FR256
 
-fn check_hash(h : &Hash, sig : &G1, pkey : &PublicKey) -> bool {
-    // check a hash with a raw signature, return t/f
-    unsafe {
-        0 == rust_libpbc::check_signature(
+mod secure {
+    use super::*;
+
+    #[derive(Copy, Clone)]
+    pub struct Zr([u8;ZR_SIZE_FR256]);
+
+    impl Zr {
+        pub fn base_vector(&self) -> &[u8] {
+            &self.0
+        }
+
+        pub fn from_str(s : &str) -> Zr {
+            let mut v = [0u8;ZR_SIZE_FR256];
+            str_to_u8v(&s, &mut v);
+            Zr(v)
+        }
+
+        pub fn to_str(&self) -> String {
+            u8v_to_typed_str("Zr", &self.base_vector())
+        }
+    }
+
+    // -----------------------------------------
+    #[derive(Copy, Clone)]
+    pub struct G1([u8;G1_SIZE_FR256]);
+
+    impl G1 {
+        pub fn base_vector(&self) -> &[u8] {
+            &self.0
+        }
+
+        pub fn to_str(&self) -> String {
+            u8v_to_typed_str("G1", &self.base_vector())
+        }
+    }
+
+    // -----------------------------------------
+    #[derive(Copy, Clone)]
+    pub struct G2([u8;G2_SIZE_FR256]);
+
+    impl G2 {
+        pub fn base_vector(&self) -> &[u8] {
+            &self.0
+        }
+
+
+        pub fn to_str(&self) -> String {
+            u8v_to_typed_str("G2", &self.base_vector())
+        }
+    }
+
+    // -----------------------------------------
+    #[derive(Copy, Clone)]
+    pub struct SecretKey (Zr);
+
+    impl SecretKey {
+        pub fn base_vector(&self) -> &[u8] {
+            self.0.base_vector()
+        }
+
+        pub fn to_str(&self) -> String {
+            u8v_to_typed_str("SKey", &self.base_vector())
+        }
+    }
+
+    // -----------------------------------------
+    #[derive(Copy, Clone)]
+    pub struct PublicKey (G2);
+
+    impl PublicKey {
+        pub fn base_vector(&self) -> &[u8] {
+            self.0.base_vector()
+        }
+
+        pub fn to_str(&self) -> String {
+            u8v_to_typed_str("PKey", &self.base_vector())
+        }
+    }
+
+    // -----------------------------------------
+    #[derive(Copy, Clone)]
+    pub struct BlsSignature {
+        sig  : G1,
+        pkey : PublicKey
+    }
+
+    // ------------------------------------------------------------------------
+    // BLS Signature Generation & Checking
+
+    pub fn sign_hash(h : &Hash, skey : &SecretKey) -> G1 {
+        // return a raw signature on a hash
+        unsafe {
+            let v = [0u8; G1_SIZE_FR256];
+            rust_libpbc::sign_hash(
                 PBC_CONTEXT_FR256 as u64,
-                sig.base_vector().as_ptr() as *mut _,
+                v.as_ptr() as *mut _,
+                skey.base_vector().as_ptr() as *mut _,
                 h.base_vector().as_ptr() as *mut _,
-                HASH_SIZE as u64,
-                pkey.base_vector().as_ptr() as *mut _)
+                HASH_SIZE as u64);
+            G1(v)
+        }
+    }
+
+    pub fn check_hash(h : &Hash, sig : &G1, pkey : &PublicKey) -> bool {
+        // check a hash with a raw signature, return t/f
+        unsafe {
+            0 == rust_libpbc::check_signature(
+                    PBC_CONTEXT_FR256 as u64,
+                    sig.base_vector().as_ptr() as *mut _,
+                    h.base_vector().as_ptr() as *mut _,
+                    HASH_SIZE as u64,
+                    pkey.base_vector().as_ptr() as *mut _)
+        }
+    }
+
+    pub fn sign_message(msg : &[u8], skey : &SecretKey, pkey : &PublicKey) -> BlsSignature {
+        // hash the message and form a BLS signature
+        BlsSignature {
+            sig  : sign_hash(&Hash::from_vector(&msg), skey),
+            pkey : pkey.clone()
+        }
+    }
+
+    pub fn check_message(msg : &[u8], sig : &BlsSignature) -> bool {
+        // check the message against the BLS signature, return t/f
+        check_hash(&Hash::from_vector(&msg), &sig.sig, &sig.pkey)
+    }
+
+    // ------------------------------------------------------------------
+    // Key Generation & Checking
+
+    pub fn get_random_Zr() -> Zr {
+        Zr(random::<[u8;ZR_SIZE_FR256]>())
+    }
+
+    pub fn make_deterministic_keys(seed : &str) -> (SecretKey, PublicKey, G1) {
+        let nel = seed.len();
+        let mut v = vec![0u8; nel];
+        let mut ix = 0;
+        for c in seed.chars() {
+            v[ix] = c as u8;
+            ix += 1;
+        }
+        make_deterministic_keys_from_u8v(&v)
+    }
+
+    pub fn make_deterministic_keys_from_u8v(v : &[u8]) -> (SecretKey, PublicKey, G1) {
+        let h = hash(&v);
+        let sk = [0u8;ZR_SIZE_FR256]; // secret keys in Zr
+        let pk = [0u8;G2_SIZE_FR256]; // public keys in G2
+        unsafe {
+            rust_libpbc::make_key_pair(
+                PBC_CONTEXT_FR256 as u64,
+                sk.as_ptr() as *mut _,
+                pk.as_ptr() as *mut _,
+                h.base_vector().as_ptr() as *mut _,
+                HASH_SIZE as u64);
+        }
+        let hpk = hash(&pk);
+        let skey = SecretKey(Zr(sk));
+        let pkey = PublicKey(G2(pk));
+        let sig  = sign_hash(&hpk, &skey);
+        (skey, pkey, sig)
+    }
+
+    pub fn check_keying(pkey : &PublicKey, sig : &G1) -> bool {
+        check_hash(&hash(&pkey.base_vector()), &sig, &pkey)
+    }
+
+    pub fn make_random_keys() -> (SecretKey, PublicKey, G1) {
+        make_deterministic_keys_from_u8v(&get_random_Zr().base_vector())
     }
 }
 
-fn sign_message(msg : &[u8], skey : &SecretKey, pkey : &PublicKey) -> BlsSignature {
-    // hash the message and form a BLS signature
-    BlsSignature {
-        sig  : sign_hash(&Hash::from_vector(&msg), skey),
-        pkey : pkey.clone()
-    }
-}
+// --------------------------------------------------------------------------
+// Faster, but less secure, pairings with curves AR160 
+// (intended for eRandHound ephemeral secrets)
 
-fn check_message(msg : &[u8], sig : &BlsSignature) -> bool {
-    // check the message against the BLS signature, return t/f
-    check_hash(&Hash::from_vector(&msg), &sig.sig, &sig.pkey)
+mod fast {
+    use super::*;
 }
