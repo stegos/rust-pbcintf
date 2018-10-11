@@ -39,12 +39,13 @@ use generic_array::typenum::consts::U8;
 
 use std::fmt;
 use std::mem;
-use sha3::{Digest, Sha3_256};
+use sha3::{Digest, Sha3_256, Shake256};
 
 use std::sync::{Mutex, Arc};
 use std::rc::Rc;
 use std::thread;
 use std::marker;
+use std::vec::*;
 use std::ops::{Add, Sub, Mul, Div, Neg, AddAssign, SubAssign, MulAssign, DivAssign};
 
 // -------------------------------------------------------------------
@@ -131,7 +132,7 @@ const CURVES : &[PBCInfo] = &[
 
 // -------------------------------------------------------------------
 // collect a vector of 8-bit values from a hex string.
-fn str_to_u8v(s: &str, x: &mut [u8]) {
+fn hexstr_to_u8v(s: &str, x: &mut [u8]) {
     let nx = x.len();
     let mut pos = 0;
     let mut val: u8 = 0;
@@ -164,7 +165,7 @@ fn str_to_u8v(s: &str, x: &mut [u8]) {
     }
 }
 
-fn u8v_to_str(x : &[u8]) -> String {
+fn u8v_to_hexstr(x : &[u8]) -> String {
     // produce a hexnum string from a byte vector
     let mut s = String::new();
     for ix in 0 .. x.len() {
@@ -177,10 +178,20 @@ fn u8v_to_typed_str(pref : &str, vec : &[u8]) -> String {
     // produce a type-prefixed hexnum from a byte vector
     let mut s = String::from(pref);
     s.push_str("(");
-    s.push_str(&u8v_to_str(&vec));
+    s.push_str(&u8v_to_hexstr(&vec));
     s.push_str(")");
     s
 }
+
+pub fn u8v_from_str(s : &str) -> Vec<u8> {
+    let nel = s.len();
+    let mut v : Vec<u8> = Vec::new();
+    for c in s.chars() {
+        v.push(c as u8);
+    }
+    v
+}
+
 
 // -------------------------------------------------------------------
 
@@ -208,8 +219,8 @@ fn main() {
                 assert_eq!(psize[3], info.field_size as u64);
 
                 let mut v1 = vec![0u8; info.g1_size];
-                str_to_u8v(&(*info.g1), &mut v1);
-                println!("G1: {}", u8v_to_str(&v1));
+                hexstr_to_u8v(&(*info.g1), &mut v1);
+                println!("G1: {}", u8v_to_hexstr(&v1));
                 let len = rust_libpbc::set_g1(
                     context,
                     v1.as_ptr() as *mut _);
@@ -222,11 +233,11 @@ fn main() {
                     v1.as_ptr() as *mut _,
                     info.g1_size as u64);
                 assert_eq!(len, info.g1_size as u64);
-                println!("G1 readback: {}", u8v_to_str(&v1));
+                println!("G1 readback: {}", u8v_to_hexstr(&v1));
                 
                 let mut v2 = vec![0u8; info.g2_size];
-                str_to_u8v(&(*info.g2), &mut v2);
-                println!("G2: {}", u8v_to_str(&v2));
+                hexstr_to_u8v(&(*info.g2), &mut v2);
+                println!("G2: {}", u8v_to_hexstr(&v2));
                 let len = rust_libpbc::set_g2(
                     context,
                     v2.as_ptr() as *mut _);
@@ -239,7 +250,7 @@ fn main() {
                     v2.as_ptr() as *mut _,
                     info.g2_size as u64);
                 assert_eq!(len, info.g2_size as u64);
-                println!("G2 readback: {}", u8v_to_str(&v2));
+                println!("G2 readback: {}", u8v_to_hexstr(&v2));
                 
             }
             println!("");
@@ -285,7 +296,7 @@ fn main() {
     println!("rand Zr = {}", secure::get_random_Zr());
 
     // test keying...
-    let (skey, pkey, sig) = secure::make_deterministic_keys("Testing");
+    let (skey, pkey, sig) = secure::make_deterministic_keys(b"Testing");
     println!("skey = {}", skey);
     println!("pkey = {}", pkey);
     println!("sig  = {}", sig);
@@ -298,7 +309,7 @@ fn main() {
     println!("rand Zr = {}", fast::get_random_Zr());
 
     // test keying...
-    let (skey, pkey, sig) = fast::make_deterministic_keys("Testing");
+    let (skey, pkey, sig) = fast::make_deterministic_keys(b"Testing");
     println!("skey = {}", skey);
     println!("pkey = {}", pkey);
     println!("sig  = {}", sig);
@@ -310,6 +321,15 @@ fn main() {
     println!("chk Zr: 0x{:x} -> {}", a, fast::Zr::from_int(a));
     println!("chk Zr: -1 -> {}", fast::Zr::from_int(-1));
     println!("chk Zr: -1 + 1 -> {}", fast::Zr::from(-1) + 1);
+
+    // -------------------------------------------
+    let h = hash_nbytes(10, b"Testing");
+    println!("h = {}", u8v_to_hexstr(&h));
+    let h = hash_nbytes(64, b"Testing");
+    println!("h = {}", u8v_to_hexstr(&h));
+ 
+
+
 }
 
 // -----------------------------------------------------
@@ -343,6 +363,35 @@ pub fn hash(msg : &[u8]) -> Hash {
     Hash(h)
 }
 
+pub fn hash_nbytes(nb : usize, msg : &[u8]) -> Vec<u8> {
+    let nmsg = msg.len();
+    let mut ct = nb;
+    let mut ans = vec![0u8; nb];
+    let mut jx = 0;
+    let mut kx = 0u8;
+    while ct > 0 {
+        let mut inp = vec![kx];
+        for ix in 0 .. nmsg {
+            inp.push(msg[ix]);
+        }
+        let mut hasher = Sha3_256::new();
+        hasher.input(inp);
+        let out = hasher.result();
+        let end = if ct > HASH_SIZE {
+                    HASH_SIZE
+                } else {
+                    ct
+                };
+        for ix in 0 .. end {
+            ans[jx + ix] = out[ix];
+        }
+        jx += end;
+        ct -= end;
+        kx += 1;
+    }
+    ans
+}
+
 // ------------------------------------------------------------------
 // Secure Pairings using BN Curve FR256 (type F, r approx 256 bits)
 
@@ -361,7 +410,7 @@ mod secure {
             // result might be larger than prime order, r,
             // but will be interpreted by PBC lib as (Zr mod r).
             let mut v = [0u8;ZR_SIZE_FR256];
-            str_to_u8v(&s, &mut v);
+            hexstr_to_u8v(&s, &mut v);
             Zr(v)
         }
 
@@ -460,6 +509,46 @@ mod secure {
     
     // -----------------------------------------
     #[derive(Copy, Clone)]
+    pub struct SecretSubKey (G1);
+
+    impl SecretSubKey {
+        pub fn base_vector(&self) -> &[u8] {
+            self.0.base_vector()
+        }
+
+        pub fn to_str(&self) -> String {
+            u8v_to_typed_str("SSubKey", &self.base_vector())
+        }
+    }
+
+    impl fmt::Display for SecretSubKey {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}", self.to_str())
+        }
+    }
+    
+    // -----------------------------------------
+    #[derive(Copy, Clone)]
+    pub struct PublicSubKey (G2);
+
+    impl PublicSubKey {
+        pub fn base_vector(&self) -> &[u8] {
+            self.0.base_vector()
+        }
+
+        pub fn to_str(&self) -> String {
+            u8v_to_typed_str("PSubKey", &self.base_vector())
+        }
+    }
+
+    impl fmt::Display for PublicSubKey {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}", self.to_str())
+        }
+    }
+    
+    // -----------------------------------------
+    #[derive(Copy, Clone)]
     pub struct BlsSignature {
         sig  : G1,
         pkey : PublicKey
@@ -514,19 +603,8 @@ mod secure {
         Zr(random::<[u8;ZR_SIZE_FR256]>())
     }
 
-    pub fn make_deterministic_keys(seed : &str) -> (SecretKey, PublicKey, G1) {
-        let nel = seed.len();
-        let mut v = vec![0u8; nel];
-        let mut ix = 0;
-        for c in seed.chars() {
-            v[ix] = c as u8;
-            ix += 1;
-        }
-        make_deterministic_keys_from_u8v(&v)
-    }
-
-    pub fn make_deterministic_keys_from_u8v(v : &[u8]) -> (SecretKey, PublicKey, G1) {
-        let h = hash(&v);
+    pub fn make_deterministic_keys(seed : &[u8]) -> (SecretKey, PublicKey, G1) {
+        let h = hash(&seed);
         let sk = [0u8;ZR_SIZE_FR256]; // secret keys in Zr
         let pk = [0u8;G2_SIZE_FR256]; // public keys in G2
         unsafe {
@@ -549,8 +627,131 @@ mod secure {
     }
 
     pub fn make_random_keys() -> (SecretKey, PublicKey, G1) {
-        make_deterministic_keys_from_u8v(&get_random_Zr().base_vector())
+        make_deterministic_keys(&get_random_Zr().base_vector())
     }
+
+    // ------------------------------------------------------------------------
+    // Subkey generation and Sakai-Kasahara Encryption
+
+    pub fn make_secret_subkey(skey : &SecretKey, seed : &[u8]) -> SecretSubKey {
+        let h = Hash::from_vector(&seed);
+        let sk = [0u8;G1_SIZE_FR256];
+        unsafe {
+            rust_libpbc::make_secret_subkey(
+                PBC_CONTEXT_FR256 as u64,
+                sk.as_ptr() as *mut _,
+                skey.base_vector().as_ptr() as *mut _,
+                h.base_vector().as_ptr() as *mut _,
+                HASH_SIZE as u64);
+        }
+        SecretSubKey(G1(sk))
+    }
+
+    pub fn make_public_subkey(pkey : &PublicKey, seed : &[u8]) -> PublicSubKey {
+        let h = Hash::from_vector(&seed);
+        let pk = [0u8;G2_SIZE_FR256];
+        unsafe {
+            rust_libpbc::make_public_subkey(
+                PBC_CONTEXT_FR256 as u64,
+                pk.as_ptr() as *mut _,
+                pkey.base_vector().as_ptr() as *mut _,
+                h.base_vector().as_ptr() as *mut _,
+                HASH_SIZE as u64);
+        }
+        PublicSubKey(G2(pk))
+    }
+
+    // structure of a SAKKI encryption. 
+    // ---------------------------------
+    // For use in UTXO's you will only want to store the
+    // ciphertext, cmsg, and the rval. Proper recipients 
+    // already know their own public keys, and the IBE ID 
+    // that was used to encrypt their payload.
+    // ----------------------------------
+    pub struct EncryptedPacket{
+        pkey    : PublicKey,    // public key of recipient
+        id      : Vec<u8>,      // IBE ID
+        rval    : G2,           // R_val used for SAKE encryption
+        cmsg    : Vec<u8>       // encrypted payload
+    }
+
+    pub fn ibe_encrypt(msg : &[u8], pkey : &PublicKey, id : &[u8]) -> EncryptedPacket {
+        let nmsg = msg.len();
+
+        // compute IBE public key
+        let pkid = make_public_subkey(&pkey, &id);
+
+        // compute hash of concatenated id:msg
+        let mut concv = Vec::from(id);
+        for b in msg.to_vec() {
+            concv.push(b);
+        }
+        let rhash = hash(&concv);
+
+        let rbuf = [0u8;G2_SIZE_FR256];
+        let pbuf = [0u8;GT_SIZE_FR256];
+        unsafe {
+            rust_libpbc::sakai_kasahara_encrypt(
+                PBC_CONTEXT_FR256 as u64,
+                rbuf.as_ptr() as *mut _,
+                pbuf.as_ptr() as *mut _,
+                pkid.base_vector().as_ptr() as *mut _,
+                rhash.base_vector().as_ptr() as *mut _,
+                HASH_SIZE as u64);
+        }
+        // encrypt with (msg XOR H(pairing-val))
+        let mut cmsg = hash_nbytes(nmsg, &pbuf);
+        for ix in 0 .. nmsg {
+            cmsg[ix] ^= msg[ix];
+        }
+        EncryptedPacket {
+            pkey    : *pkey,
+            id      : id.to_vec(),
+            rval    : G2(rbuf),
+            cmsg    : cmsg
+        }
+    }
+
+    pub fn ibe_decrypt(pack : &EncryptedPacket, skey : &SecretKey) -> Option<Vec<u8>> {
+        let skid = make_secret_subkey(&skey, &pack.id);
+        let pkid = make_public_subkey(&pack.pkey, &pack.id);
+        let nmsg = pack.cmsg.len();
+        let mut msg = vec![0u8; nmsg];
+        let pbuf = [0u8; GT_SIZE_FR256];
+        unsafe {
+            rust_libpbc::sakai_kasahara_decrypt(
+                PBC_CONTEXT_FR256 as u64,
+                pbuf.as_ptr() as *mut _,
+                pack.rval.base_vector().as_ptr() as *mut _,
+                skid.base_vector().as_ptr() as *mut _);
+        }
+        // decrypt using (ctxt XOR H(pairing_val))
+        let mut msg = hash_nbytes(nmsg, &pbuf);
+        for ix in 0 .. nmsg {
+            msg[ix] ^= pack.cmsg[ix];
+        }
+        // Now check that message was correctly decrypted
+        // compute hash of concatenated id:msg
+        let mut concv = pack.id.clone();
+        for b in msg.clone() {
+            concv.push(b);
+        }
+        let rhash = hash(&concv);
+        unsafe {
+            let ans = rust_libpbc::sakai_kasahara_check(
+                        PBC_CONTEXT_FR256 as u64,
+                        pack.rval.base_vector().as_ptr() as *mut _,
+                        pack.pkey.base_vector().as_ptr() as *mut _,
+                        rhash.base_vector().as_ptr() as *mut _,
+                        HASH_SIZE as u64);
+            if ans == 0 {
+                Some(msg)
+            } else {
+                None
+            }
+        }
+    }
+
 }
 
 // --------------------------------------------------------------------------
@@ -570,7 +771,7 @@ mod fast {
 
         pub fn from_str(s : &str) -> Zr {
             let mut v = [0u8;ZR_SIZE_AR160];
-            str_to_u8v(&s, &mut v);
+            hexstr_to_u8v(&s, &mut v);
             Zr(v)
         }
 
@@ -1116,19 +1317,8 @@ mod fast {
         Zr(random::<[u8;ZR_SIZE_AR160]>())
     }
 
-    pub fn make_deterministic_keys(seed : &str) -> (SecretKey, PublicKey, G1) {
-        let nel = seed.len();
-        let mut v = vec![0u8; nel];
-        let mut ix = 0;
-        for c in seed.chars() {
-            v[ix] = c as u8;
-            ix += 1;
-        }
-        make_deterministic_keys_from_u8v(&v)
-    }
-
-    pub fn make_deterministic_keys_from_u8v(v : &[u8]) -> (SecretKey, PublicKey, G1) {
-        let h = hash(&v);
+    pub fn make_deterministic_keys(seed : &[u8]) -> (SecretKey, PublicKey, G1) {
+        let h = hash(&seed);
         let sk = [0u8;ZR_SIZE_AR160]; // secret keys in Zr
         let pk = [0u8;G2_SIZE_AR160]; // public keys in G2
         unsafe {
@@ -1151,7 +1341,7 @@ mod fast {
     }
 
     pub fn make_random_keys() -> (SecretKey, PublicKey, G1) {
-        make_deterministic_keys_from_u8v(&get_random_Zr().base_vector())
+        make_deterministic_keys(&get_random_Zr().base_vector())
     }
 
     // ----------------------------------------------------------------
@@ -1357,8 +1547,8 @@ mod fast {
                 ans.as_ptr() as *mut _,
                 a.base_vector().as_ptr() as *mut _,
                 b.base_vector().as_ptr() as *mut _);
-            GT(ans)
         }
+        GT(ans)
     }
 
     pub fn mul_GT_GT(a : &GT, b : &GT) -> GT {
@@ -1369,8 +1559,8 @@ mod fast {
                 PBC_CONTEXT_AR160 as u64,
                 ans.as_ptr() as *mut _,
                 b.base_vector().as_ptr() as *mut _);
-            GT(ans)
         }
+        GT(ans)
     }
 
     pub fn div_GT_GT(a : &GT, b : &GT) -> GT {
@@ -1381,8 +1571,8 @@ mod fast {
                 PBC_CONTEXT_AR160 as u64,
                 ans.as_ptr() as *mut _,
                 b.base_vector().as_ptr() as *mut _);
-            GT(ans)
         }
+        GT(ans)
     }
 
     pub fn exp_GT_Zr(a : &GT, b : &Zr) -> GT {
@@ -1393,8 +1583,8 @@ mod fast {
                 PBC_CONTEXT_AR160 as u64,
                 ans.as_ptr() as *mut _,
                 b.base_vector().as_ptr() as *mut _);
-            GT(ans)
         }
+        GT(ans)
     }
 
     pub fn inv_GT(a : &GT) -> GT {
@@ -1404,9 +1594,68 @@ mod fast {
             rust_libpbc::inv_GT_val(
                 PBC_CONTEXT_AR160 as u64,
                 ans.as_ptr() as *mut _);
-            GT(ans)
+        }
+        GT(ans)
+    }
+
+    // -------------------------------------------
+
+    pub fn get_G1() -> G1 {
+        let u = [0u8;G1_SIZE_AR160];
+        unsafe {
+            rust_libpbc::get_g1(
+                PBC_CONTEXT_AR160 as u64,
+                u.as_ptr() as *mut _,
+                G1_SIZE_AR160 as u64);
+        }
+        G1(u)
+    }
+
+    pub fn get_G2() -> G2 {
+        let v = [0u8;G2_SIZE_AR160];
+        unsafe {
+            rust_libpbc::get_g2(
+                PBC_CONTEXT_AR160 as u64,
+                v.as_ptr() as *mut _,
+                G1_SIZE_AR160 as u64);
+        }
+        G2(v)
+    }
+
+    impl G1 {
+        pub fn generator() -> G1 {
+            get_G1()
+        }
+
+        pub fn from_hash(h : &Hash) -> G1 {
+            let u = [0u8; G1_SIZE_AR160];
+            unsafe {
+                rust_libpbc::get_G1_from_hash(
+                    PBC_CONTEXT_AR160 as u64,
+                    u.as_ptr() as *mut _,
+                    h.base_vector().as_ptr() as *mut _,
+                    HASH_SIZE as u64);
+            }
+            G1(u)
         }
     }
 
+    impl G2 {
+        pub fn generator() -> G2 {
+            get_G2()
+        }
+
+        pub fn from_hash(h : &Hash) -> G2 {
+            let v = [0u8; G2_SIZE_AR160];
+            unsafe {
+                rust_libpbc::get_G2_from_hash(
+                    PBC_CONTEXT_AR160 as u64,
+                    v.as_ptr() as *mut _,
+                    h.base_vector().as_ptr() as *mut _,
+                    HASH_SIZE as u64);
+            }
+            G2(v)
+        }
+    }
 }
 
