@@ -47,6 +47,7 @@ use std::thread;
 use std::marker;
 
 // -------------------------------------------------------------------
+// Fast AR160 curves, but low security 2^80
 
 const PBC_CONTEXT_AR160 : u8 = 0;
 const NAME_AR160 : &str = "AR160";
@@ -67,6 +68,7 @@ const G2_SIZE_FR256 : usize = 65;
 const GT_SIZE_FR256 : usize = 384;
 
 // -------------------------------------------------------------------
+// Secure BN curves, security approx 2^128
 
 const PBC_CONTEXT_FR256 : u8 = 1;
 const NAME_FR256 : &str = "FR256";
