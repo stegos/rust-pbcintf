@@ -38,7 +38,7 @@ const G2_FR256 : &str = "e20543135c81c67051dc263a2bc882b838da80b05f3e1d7efa420a5
 const ZR_SIZE_FR256 : usize = 32;
 const G1_SIZE_FR256 : usize = 33;
 const G2_SIZE_FR256 : usize = 65;
-const GP_SIZE_FR256 : usize = 384;
+const GT_SIZE_FR256 : usize = 384;
 
 // -------------------------------------------------------------------
 
@@ -57,7 +57,7 @@ const G2_AR160 : &str = "A4913CAB767684B308E6F71D3994D65C2F1EB1BE4C9E96E276CD92E
 const ZR_SIZE_AR160 : usize = 20;
 const G1_SIZE_AR160 : usize = 65;
 const G2_SIZE_AR160 : usize = 65;
-const GP_SIZE_AR160 : usize = 128;
+const GT_SIZE_AR160 : usize = 128;
 
 // -------------------------------------------------------------------
 
@@ -81,7 +81,7 @@ const CURVES : &[PBCInfo] = &[
         text         : INIT_TEXT_AR160,
         g1_size      : G1_SIZE_AR160,
         g2_size      : G2_SIZE_AR160,
-        pairing_size : GP_SIZE_AR160,
+        pairing_size : GT_SIZE_AR160,
         field_size   : ZR_SIZE_AR160,
         order        : ORDER_AR160,
         g1           : G1_AR160,
@@ -93,7 +93,7 @@ const CURVES : &[PBCInfo] = &[
         text         : INIT_TEXT_FR256,
         g1_size      : G1_SIZE_FR256,
         g2_size      : G2_SIZE_FR256,
-        pairing_size : GP_SIZE_FR256,
+        pairing_size : GT_SIZE_FR256,
         field_size   : ZR_SIZE_FR256,
         order        : ORDER_FR256,
         g1           : G1_FR256,
@@ -234,7 +234,7 @@ fn main() {
     println!("Echo Output: {}", out_str);
     println!("");
 
-    // init PBC library
+    // init PBC library -- must only be performed once
     let init = Mutex::new(false);
     {
         let mut done = init.lock().unwrap();
@@ -248,7 +248,10 @@ fn main() {
     let h = Hash::from_vector(b"");
     println!("hash(\"\") = {}", h.to_str());
     assert_eq!(h.to_str(), "H(a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a)");
+    println!("");
 
+    // -------------------------------------
+    // on Secure pairings
     // test PRNG
     let z = secure::get_random_Zr();
     println!("rand Zr = {}", z.to_str());
@@ -259,6 +262,20 @@ fn main() {
     println!("pkey = {}", pkey.to_str());
     println!("sig  = {}", sig.to_str());
     assert!(secure::check_keying(&pkey, &sig));
+    println!("");
+
+    // -------------------------------------
+    // on Fast pairings
+    // test PRNG
+    let z = fast::get_random_Zr();
+    println!("rand Zr = {}", z.to_str());
+
+    // test keying...
+    let (skey, pkey, sig) = fast::make_deterministic_keys("Testing");
+    println!("skey = {}", skey.to_str());
+    println!("pkey = {}", pkey.to_str());
+    println!("sig  = {}", sig.to_str());
+    assert!(fast::check_keying(&pkey, &sig));
 }
 
 // -----------------------------------------------------
@@ -526,6 +543,21 @@ mod fast {
 
     // -----------------------------------------
     #[derive(Copy, Clone)]
+    pub struct GT([u8;GT_SIZE_AR160]);
+
+    impl GT {
+        pub fn base_vector(&self) -> &[u8] {
+            &self.0
+        }
+
+
+        pub fn to_str(&self) -> String {
+            u8v_to_typed_str("GT", &self.base_vector())
+        }
+    }
+
+    // -----------------------------------------
+    #[derive(Copy, Clone)]
     pub struct SecretKey (Zr);
 
     impl SecretKey {
@@ -622,5 +654,260 @@ mod fast {
     pub fn make_random_keys() -> (SecretKey, PublicKey, G1) {
         make_deterministic_keys_from_u8v(&get_random_Zr().base_vector())
     }
+
+    // ----------------------------------------------------------------
+    // Curve Arithmetic...
+
+    pub fn add_Zr_Zr(a : &Zr, b : &Zr) -> Zr {
+        let mut ans = [0u8;ZR_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::add_Zr_vals(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _,
+                b.base_vector().as_ptr() as *mut _);
+            Zr(ans)
+        }
+    }
+
+    pub fn sub_Zr_Zr(a : &Zr, b : &Zr) -> Zr {
+        let mut ans = [0u8;ZR_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::sub_Zr_vals(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _,
+                b.base_vector().as_ptr() as *mut _);
+            Zr(ans)
+        }
+    }
+
+    pub fn mul_Zr_Zr(a : &Zr, b : &Zr) -> Zr {
+        let mut ans = [0u8;ZR_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::mul_Zr_vals(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _,
+                b.base_vector().as_ptr() as *mut _);
+            Zr(ans)
+        }
+    }
+
+    pub fn div_Zr_Zr(a : &Zr, b : &Zr) -> Zr {
+        let mut ans = [0u8;ZR_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::div_Zr_vals(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _,
+                b.base_vector().as_ptr() as *mut _);
+            Zr(ans)
+        }
+    }
+
+    pub fn exp_Zr_Zr(a : &Zr, b : &Zr) -> Zr {
+        let mut ans = [0u8;ZR_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::exp_Zr_vals(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _,
+                b.base_vector().as_ptr() as *mut _);
+            Zr(ans)
+        }
+    }
+
+    pub fn neg_Zr(a : &Zr) -> Zr {
+        let mut ans = [0u8;ZR_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::neg_Zr_val(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _);
+            Zr(ans)
+        }
+    }
+
+    pub fn inv_Zr(a : &Zr) -> Zr {
+        let mut ans = [0u8;ZR_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::inv_Zr_val(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _);
+            Zr(ans)
+        }
+    }
+
+    // ---------------------------------
+
+    pub fn mul_G1_Zr(a : &G1, b : &Zr) -> G1 {
+        let mut ans = [0u8;G1_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::exp_G1z(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _,
+                b.base_vector().as_ptr() as *mut _);
+            G1(ans)
+        }
+    }
+
+    pub fn div_G1_Zr(a : &G1, b : &Zr) -> G1 {
+        let invb = inv_Zr(&b);
+        mul_G1_Zr(&a, &invb)
+    }
+
+    pub fn add_G1_G1(a : &G1, b : &G1) -> G1 {
+        let mut ans = [0u8;G1_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::add_G1_pts(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _,
+                b.base_vector().as_ptr() as *mut _);
+            G1(ans)
+        }
+    }
+
+    pub fn sub_G1_G1(a : &G1, b : &G1) -> G1 {
+        let mut ans = [0u8;G1_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::sub_G1_pts(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _,
+                b.base_vector().as_ptr() as *mut _);
+            G1(ans)
+        }
+    }
+
+    pub fn neg_G1(a : &G1) -> G1 {
+        let mut ans = [0u8;G1_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::neg_G1_pt(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _);
+            G1(ans)
+        }
+    }
+
+    // ------------------------------------------------------
+
+    pub fn mul_G2_Zr(a : &G2, b : &Zr) -> G2 {
+        let mut ans = [0u8;G2_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::exp_G2z(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _,
+                b.base_vector().as_ptr() as *mut _);
+            G2(ans)
+        }
+    }
+
+    pub fn div_G2_Zr(a : &G2, b : &Zr) -> G2 {
+        let invb = inv_Zr(&b);
+        mul_G2_Zr(&a, &invb)
+    }
+
+    pub fn add_G2_G2(a : &G2, b : &G2) -> G2 {
+        let mut ans = [0u8;G2_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::add_G2_pts(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _,
+                b.base_vector().as_ptr() as *mut _);
+            G2(ans)
+        }
+    }
+
+    pub fn sub_G2_G2(a : &G2, b : &G2) -> G2 {
+        let mut ans = [0u8;G2_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::sub_G2_pts(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _,
+                b.base_vector().as_ptr() as *mut _);
+            G2(ans)
+        }
+    }
+
+    pub fn neg_G2(a : &G2) -> G2 {
+        let mut ans = [0u8;G2_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::neg_G2_pt(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _);
+            G2(ans)
+        }
+    }
+
+    // -------------------------------------------------
+
+    pub fn compute_pairing(a : &G1, b : &G2) -> GT {
+        let ans = [0u8;GT_SIZE_AR160];
+        unsafe {
+            rust_libpbc::compute_pairing(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _,
+                a.base_vector().as_ptr() as *mut _,
+                b.base_vector().as_ptr() as *mut _);
+            GT(ans)
+        }
+    }
+
+    pub fn mul_GT_GT(a : &GT, b : &GT) -> GT {
+        let mut ans = [0u8;GT_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::mul_GT_vals(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _,
+                b.base_vector().as_ptr() as *mut _);
+            GT(ans)
+        }
+    }
+
+    pub fn div_GT_GT(a : &GT, b : &GT) -> GT {
+        let mut ans = [0u8;GT_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::div_GT_vals(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _,
+                b.base_vector().as_ptr() as *mut _);
+            GT(ans)
+        }
+    }
+
+    pub fn exp_GT_Zr(a : &GT, b : &Zr) -> GT {
+        let mut ans = [0u8;GT_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::exp_GTz(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _,
+                b.base_vector().as_ptr() as *mut _);
+            GT(ans)
+        }
+    }
+
+    pub fn inv_GT(a : &GT) -> GT {
+        let mut ans = [0u8;GT_SIZE_AR160];
+        ans.copy_from_slice(a.base_vector());
+        unsafe {
+            rust_libpbc::inv_GT_val(
+                PBC_CONTEXT_AR160 as u64,
+                ans.as_ptr() as *mut _);
+            GT(ans)
+        }
+    }
+
 }
 
