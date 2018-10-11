@@ -1,8 +1,16 @@
 extern crate rust_libpbc;
 extern crate gmp;
+extern crate sha3;
+
+#[macro_use]
+extern crate generic_array;
+extern crate typenum;
+use generic_array::{GenericArray, ArrayLength};
+use generic_array::typenum::consts::U8;
 
 use std::fmt;
 use std::mem;
+use sha3::{Digest, Sha3_256};
 
 // -------------------------------------------------------------------
 
@@ -120,6 +128,7 @@ fn str_to_u8v(s: &str, x: &mut [u8]) {
 }
 
 fn u8v_to_str(x : &[u8]) -> String {
+    // produce a hexnum string from a byte vector
     let mut s = String::new();
     for ix in 0 .. x.len() {
         s.push_str(&format!("{:02x}", x[ix]));
@@ -127,43 +136,18 @@ fn u8v_to_str(x : &[u8]) -> String {
     s
 }
 
-/*
-struct ByteVec(Vec<u8>);
-struct HexString(String);
-
-impl ByteVec {
-    fn to_hexstr(self) -> String {
-        let mut s = String::new();
-        for v in self.0 {
-            s.push_str(&format!("{:02x}", v));
-        }
-        s
-    }
-
-    fn of_size(len : usize) -> ByteVec {
-        ByteVec(vec![0; len])
-    }
-
-    fn from_str(s : &str) -> ByteVec {
-        let mut bv : Vec<u8> = vec![0; s.len() >> 1];
-        str_to_u8v(&s, &mut bv);
-        ByteVec(bv)
-    }
+fn u8v_to_typed_str(pref : &str, vec : &[u8]) -> String {
+    // produce a type-prefixed hexnum from a byte vector
+    let mut s = String::from(pref);
+    s.push_str("(");
+    s.push_str(&u8v_to_str(&vec));
+    s.push_str(")");
+    s
 }
 
-impl HexString {
-    fn to_byteVec(self) -> ByteVec {
-        let len = self.0.len();
-        let mut bv : Vec<u8> = vec![0; len >> 1];
-        str_to_u8v(&self.0, &mut bv);
-        ByteVec(bv)
-    }
-}
-*/
 // -------------------------------------------------------------------
 
 fn init_pairings() {
-    let psize : [u64;4] = [0;4];
     for info in CURVES {
         let context = info.context as u64;
         unsafe {
@@ -171,6 +155,7 @@ fn init_pairings() {
             println!("Context: {}", context);
             println!("{}", (*info.text).to_string());
 
+            let mut psize = [0u64;4];
             let ans = rust_libpbc::init_pairing(
                 context,
                 info.text as *mut _,
@@ -183,7 +168,7 @@ fn init_pairings() {
             assert_eq!(psize[2], info.pairing_size as u64);
             assert_eq!(psize[3], info.field_size as u64);
 
-            let mut v1 : Vec<u8> = vec![0; info.g1_size];
+            let mut v1 = vec![0u8; info.g1_size];
             str_to_u8v(&(*info.g1), &mut v1);
             println!("G1: {}", u8v_to_str(&v1));
             let len = rust_libpbc::set_g1(
@@ -192,7 +177,7 @@ fn init_pairings() {
             // returns nbr bytes read, should equal length of G1
             assert_eq!(len, info.g1_size as i64);
 
-            let mut v1 : Vec<u8> = vec![0; info.g1_size];
+            let mut v1 = vec![0u8; info.g1_size];
             let len = rust_libpbc::get_g1(
                 context,
                 v1.as_ptr() as *mut _,
@@ -200,7 +185,7 @@ fn init_pairings() {
             assert_eq!(len, info.g1_size as u64);
             println!("G1 readback: {}", u8v_to_str(&v1));
             
-            let mut v2 : Vec<u8> = vec![0; info.g2_size];
+            let mut v2 = vec![0u8; info.g2_size];
             str_to_u8v(&(*info.g2), &mut v2);
             println!("G2: {}", u8v_to_str(&v2));
             let len = rust_libpbc::set_g2(
@@ -209,7 +194,7 @@ fn init_pairings() {
             // returns nbr bytes read, should equal length of G2
             assert_eq!(len, info.g2_size as i64);
 
-            let mut v2 : Vec<u8> = vec![0; info.g2_size];
+            let mut v2 = vec![0u8; info.g2_size];
             let len = rust_libpbc::get_g2(
                 context,
                 v2.as_ptr() as *mut _,
@@ -227,7 +212,7 @@ fn main() {
     init_pairings();
     println!("Hello, world!");
     let input = "hello!".as_bytes();
-    let output: Vec<u8> = vec![0; input.len()];
+    let output = vec![0u8; input.len()];
     unsafe {
         let echo_out = rust_libpbc::echo(
             input.len() as u64,
@@ -242,68 +227,155 @@ fn main() {
 }
 
 // -----------------------------------------------------
-
-const HASH_SIZE : usize = 32;
-
 #[derive(Copy, Clone)]
 struct Zr([u8;ZR_SIZE_FR256]);
 
+impl Zr {
+    fn base_vector(&self) -> &[u8] {
+        &self.0
+    }
+
+    fn from_str(s : &str) -> Zr {
+        let mut v = [0u8;ZR_SIZE_FR256];
+        str_to_u8v(&s, &mut v);
+        Zr(v)
+    }
+
+    fn to_str(&self) -> String {
+        u8v_to_typed_str("Zr", &self.base_vector())
+    }
+}
+
+// -----------------------------------------
 #[derive(Copy, Clone)]
 struct G1([u8;G1_SIZE_FR256]);
 
+impl G1 {
+    fn base_vector(&self) -> &[u8] {
+        &self.0
+    }
+
+    fn to_str(&self) -> String {
+        u8v_to_typed_str("G1", &self.base_vector())
+    }
+}
+
+// -----------------------------------------
 #[derive(Copy, Clone)]
 struct G2([u8;G2_SIZE_FR256]);
 
-#[derive(Copy, Clone)]
-struct Hash([u8;HASH_SIZE]);
+impl G2 {
+    fn base_vector(&self) -> &[u8] {
+        &self.0
+    }
+
+
+    fn to_str(&self) -> String {
+        u8v_to_typed_str("G2", &self.base_vector())
+    }
+}
+
+// -----------------------------------------
+const HASH_SIZE : usize = 32;
 
 #[derive(Copy, Clone)]
-struct PbcSecretKey (Zr);
+struct Hash([u8; HASH_SIZE]);
 
+impl Hash {
+    fn base_vector(&self) -> &[u8] {
+        &self.0
+    }
+
+    fn from_vector(msg : &[u8]) -> Hash {
+        hash(msg)
+    }
+
+    fn to_str(&self) -> String {
+        u8v_to_typed_str("H", &self.base_vector())
+    }
+}
+
+// -----------------------------------------
 #[derive(Copy, Clone)]
-struct PbcPublicKey (G2);
+struct SecretKey (Zr);
 
-struct PbcBlsSignature {
+impl SecretKey {
+    fn base_vector(&self) -> &[u8] {
+        self.0.base_vector()
+    }
+
+    fn to_str(&self) -> String {
+        u8v_to_typed_str("SKey", &self.base_vector())
+    }
+}
+
+// -----------------------------------------
+#[derive(Copy, Clone)]
+struct PublicKey (G2);
+
+impl PublicKey {
+    fn base_vector(&self) -> &[u8] {
+        self.0.base_vector()
+    }
+
+    fn to_str(&self) -> String {
+        u8v_to_typed_str("PKey", &self.base_vector())
+    }
+}
+
+// -----------------------------------------
+#[derive(Copy, Clone)]
+struct BlsSignature {
     sig  : G1,
-    pkey : PbcPublicKey
+    pkey : PublicKey
 }
 
-fn hash(_msg : &[u8]) -> Hash {
-    // dummy stub for now
-    Hash([0;HASH_SIZE])
+// ------------------------------------------------------------------------
+
+fn hash(msg : &[u8]) -> Hash {
+    let mut hasher = Sha3_256::new();
+    hasher.input(msg);
+    let out = hasher.result();
+    let mut h = [0u8; HASH_SIZE];
+    h.copy_from_slice(&out[.. HASH_SIZE]);
+    Hash(h)
 }
 
-fn sign_hash(h : &Hash, skey : &PbcSecretKey) -> G1 {
-    let mut v : [u8; G1_SIZE_FR256] = [0; G1_SIZE_FR256];
+fn sign_hash(h : &Hash, skey : &SecretKey) -> G1 {
+    // return a raw signature on a hash
     unsafe {
+        let v = [0u8; G1_SIZE_FR256];
         rust_libpbc::sign_hash(
             PBC_CONTEXT_FR256 as u64,
             v.as_ptr() as *mut _,
-            (skey.0).0.as_ptr() as *mut _,
-            h.0.as_ptr() as *mut _,
+            skey.base_vector().as_ptr() as *mut _,
+            h.base_vector().as_ptr() as *mut _,
             HASH_SIZE as u64);
+        G1(v)
     }
-    G1(v)
 }
 
-fn check_hash(h : &Hash, sig : &G1, pkey : &PbcPublicKey) -> bool {
+fn check_hash(h : &Hash, sig : &G1, pkey : &PublicKey) -> bool {
+    // check a hash with a raw signature, return t/f
     unsafe {
         0 == rust_libpbc::check_signature(
                 PBC_CONTEXT_FR256 as u64,
-                sig.0.as_ptr() as *mut _,
-                h.0.as_ptr() as *mut _,
+                sig.base_vector().as_ptr() as *mut _,
+                h.base_vector().as_ptr() as *mut _,
                 HASH_SIZE as u64,
-                (pkey.0).0.as_ptr() as *mut _)
+                pkey.base_vector().as_ptr() as *mut _)
     }
 }
 
-fn sign_message(msg : &[u8], skey : &PbcSecretKey, pkey : &PbcPublicKey) -> PbcBlsSignature {
-    PbcBlsSignature {
-        sig  : sign_hash(&hash(&msg), skey),
+fn sign_message(msg : &[u8], skey : &SecretKey, pkey : &PublicKey) -> BlsSignature {
+    // hash the message and form a BLS signature
+    BlsSignature {
+        sig  : sign_hash(&Hash::from_vector(&msg), skey),
         pkey : pkey.clone()
     }
 }
 
-fn check_message(msg : &[u8], sig : &PbcBlsSignature) -> bool {
-    check_hash(&hash(&msg), &sig.sig, &sig.pkey)
+fn check_message(msg : &[u8], sig : &BlsSignature) -> bool {
+    // check the message against the BLS signature, return t/f
+    check_hash(&Hash::from_vector(&msg), &sig.sig, &sig.pkey)
 }
