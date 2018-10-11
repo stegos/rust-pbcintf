@@ -22,17 +22,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
-----------------------------------------------------------------------------
-Internally, ECC point multiplication depends on projective coordinates expressed 
-as 4 components (x, y, z, t), each of which is expressed as 51-bit integer fragments 
-of a 256 bit number. This permits very fast addition/subtraction of field elements, 
-with overflows spilling into the upper bits of each 64-bit fragment. During multiply 
-operations these overflows are reapportioned to higher fragments.
-
-Externally the field elements of the coordinates are held as 256 bit bignums in 
-little-endian order, normally expressed as quads of 64-bit unsigned fragments. When 
-necessary, these are forcibly viewed through an "unsafe" transformation to/from 32-bytes.
-
 ---------------------------------------------------------------------------- */
 
 extern crate rust_libpbc;
