@@ -16,6 +16,7 @@ fn main() {
         .compile("pbc_intf");
 
     println!("cargo:rustc-link-lib=pbc");
+    println!("cargo:rustc-link-lib=gmp");
 
     // The bindgen::Builder is the main entry point
     // to bindgen, and lets you build up options for
