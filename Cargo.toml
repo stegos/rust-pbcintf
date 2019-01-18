@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Eugene Chupriyanov <tchu@tchu.ru>"]
 links = "pbc"
 build = "build.rs"
+edition = "2018"
 
 [dev-dependencies]
 rust-gmp = "0.5.0"
