@@ -4,12 +4,15 @@ version = "0.1.0"
 authors = ["Eugene Chupriyanov <tchu@tchu.ru>"]
 links = "pbc"
 build = "build.rs"
+edition = "2018"
 
-[dependencies]
-
-[[example]]
-name = "echo-test"
+[dev-dependencies]
+rust-gmp = "0.5.0"
+sha3 = "0.8"
+rand = "0.6"
+generic-array = "0.12.0"
+typenum = "1.10.0"
 
 [build-dependencies]
-bindgen = "0.42.1"
-cc = "1.0.25"
+bindgen = "0.46"
+cc = "1.0"
