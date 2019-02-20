@@ -15,9 +15,6 @@ fn main() {
         .file("src/pbc_intf.cpp")
         .compile("pbc_intf");
 
-    println!("cargo:rustc-link-lib=pbc");
-    println!("cargo:rustc-link-lib=gmp");
-
     // The bindgen::Builder is the main entry point
     // to bindgen, and lets you build up options for
     // the resulting bindings.
@@ -35,13 +32,8 @@ fn main() {
     bindings
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");
-    /*
-    bindings
-        .write_to_file("src/bindings.rs")
-        .expect("Couldn't write bindings!");
-    */
-    // Tell rustc to link against libPBC and libGMP
-    println!("cargo:rustc-link-lib=dylib=pbc");
-    println!("cargo:rustc-link-lib=dylib=gmp");
-    // println!("cargo:rustc-link-search=/Users/davidmcclain/projects/Emotiq/var/local/lib");
+
+    println!("cargo:rustc-link-search=/usr/local/lib");
+    println!("cargo:rustc-link-lib=static=pbc");
+    println!("cargo:rustc-link-lib=static=gmp");
 }
